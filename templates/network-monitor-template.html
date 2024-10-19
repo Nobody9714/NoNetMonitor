@@ -1,0 +1,170 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Network Monitor</title>
+    <script src="https://cdn.plot.ly/plotly-latest.min.js"></script>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            line-height: 1.6;
+            color: #333;
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+        h1, h2 {
+            color: #2c3e50;
+        }
+        .controls {
+            margin-bottom: 20px;
+        }
+        button, select {
+            background-color: #3498db;
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            text-align: center;
+            text-decoration: none;
+            display: inline-block;
+            font-size: 16px;
+            margin: 4px 2px;
+            cursor: pointer;
+        }
+        select {
+            background-color: #2980b9;
+        }
+        .graph {
+            margin-bottom: 30px;
+        }
+        #testResults, #quickLook {
+            background-color: #ecf0f1;
+            padding: 15px;
+            border-radius: 5px;
+            margin-bottom: 20px;
+        }
+        #errorMessage {
+            color: #e74c3c;
+            font-weight: bold;
+        }
+        .quick-look-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 20px;
+        }
+        .quick-look-item {
+            background-color: #fff;
+            padding: 10px;
+            border-radius: 5px;
+            box-shadow: 0 2px 5px rgba(0,0,0,0.1);
+        }
+        .quick-look-item h3 {
+            margin-top: 0;
+            color: #3498db;
+        }
+    </style>
+</head>
+<body>
+    <h1>Network Monitor</h1>
+    
+    <div id="quickLook">
+        <h2>Quick Look</h2>
+        <div class="quick-look-grid">
+            <div class="quick-look-item">
+                <h3>Last Test</h3>
+                {% if last_test is not none %}
+                <p><strong>Download:</strong> {{ "%.2f"|format(last_test['Download (Mbps)']) }} Mbps</p>
+                <p><strong>Upload:</strong> {{ "%.2f"|format(last_test['Upload (Mbps)']) }} Mbps</p>
+                <p><strong>Latency:</strong> {{ "%.2f"|format(last_test['Ping (ms)']) }} ms</p>
+                <p><strong>Time:</strong> {{ last_test['Timestamp'] }}</p>
+                {% else %}
+                <p>No tests recorded yet.</p>
+                {% endif %}
+            </div>
+            <div class="quick-look-item">
+                <h3>24 Hour Average</h3>
+                <p><strong>Download:</strong> {{ "%.2f"|format(avg_24h['download']) }} Mbps</p>
+                <p><strong>Upload:</strong> {{ "%.2f"|format(avg_24h['upload']) }} Mbps</p>
+                <p><strong>Latency:</strong> {{ "%.2f"|format(avg_24h['ping']) }} ms</p>
+            </div>
+        </div>
+    </div>
+    
+    <div class="controls">
+        <button onclick="runSpeedTest()">Run Manual Speed Test</button>
+        
+        <select id="intervalSelect" onchange="changeTimeframe()">
+            <option value="15" {% if selected_interval == '15' %}selected{% endif %}>Last 15 minutes</option>
+            <option value="30" {% if selected_interval == '30' %}selected{% endif %}>Last 30 minutes</option>
+            <option value="60" {% if selected_interval == '60' %}selected{% endif %}>Last 1 hour</option>
+            <option value="360" {% if selected_interval == '360' %}selected{% endif %}>Last 6 hours</option>
+            <option value="720" {% if selected_interval == '720' %}selected{% endif %}>Last 12 hours</option>
+            <option value="1440" {% if selected_interval == '1440' %}selected{% endif %}>Last 1 day</option>
+            <option value="4320" {% if selected_interval == '4320' %}selected{% endif %}>Last 3 days</option>
+            <option value="7200" {% if selected_interval == '7200' %}selected{% endif %}>Last 5 days</option>
+            <option value="10080" {% if selected_interval == '10080' %}selected{% endif %}>Last 7 days</option>
+            <option value="20160" {% if selected_interval == '20160' %}selected{% endif %}>Last 14 days</option>
+            <option value="43200" {% if selected_interval == '43200' %}selected{% endif %}>Last 30 days</option>
+            <option value="86400" {% if selected_interval == '86400' %}selected{% endif %}>Last 60 days</option>
+            <option value="129600" {% if selected_interval == '129600' %}selected{% endif %}>Last 90 days</option>
+            <option value="172800" {% if selected_interval == '172800' %}selected{% endif %}>Last 120 days</option>
+            <option value="525600" {% if selected_interval == '525600' %}selected{% endif %}>Last 1 year</option>
+            <option value="1051200" {% if selected_interval == '1051200' %}selected{% endif %}>Last 2 years</option>
+        </select>
+    </div>
+
+    <div id="testResults" style="display: none;">
+        <h2>Latest Test Results</h2>
+        <div id="successResults">
+            <p><strong>Download Speed:</strong> <span id="downloadSpeed"></span> Mbps</p>
+            <p><strong>Upload Speed:</strong> <span id="uploadSpeed"></span> Mbps</p>
+            <p><strong>Ping:</strong> <span id="pingResult"></span> ms</p>
+            <p><strong>Server:</strong> <span id="serverInfo"></span></p>
+        </div>
+        <div id="errorMessage" style="display: none;"></div>
+    </div>
+
+    {% for graph in graphs %}
+    <div class="graph">
+        {{ graph | safe }}
+    </div>
+    {% endfor %}
+
+    <script>
+        function runSpeedTest() {
+            document.getElementById('testResults').style.display = 'block';
+            document.getElementById('successResults').style.display = 'none';
+            document.getElementById('errorMessage').style.display = 'none';
+            document.getElementById('errorMessage').textContent = 'Running speed test...';
+            
+            fetch('/run-test', { method: 'POST' })
+                .then(response => response.json())
+                .then(data => {
+                    if (data.success) {
+                        document.getElementById('successResults').style.display = 'block';
+                        document.getElementById('errorMessage').style.display = 'none';
+                        document.getElementById('downloadSpeed').textContent = data.data.download;
+                        document.getElementById('uploadSpeed').textContent = data.data.upload;
+                        document.getElementById('pingResult').textContent = data.data.ping;
+                        document.getElementById('serverInfo').textContent = data.data.server;
+                        // Refresh the page to update the Quick Look section
+                        setTimeout(() => location.reload(), 2000);
+                    } else {
+                        throw new Error(data.message);
+                    }
+                })
+                .catch(error => {
+                    document.getElementById('successResults').style.display = 'none';
+                    document.getElementById('errorMessage').style.display = 'block';
+                    document.getElementById('errorMessage').textContent = 'Error: ' + error.message;
+                });
+        }
+
+        function changeTimeframe() {
+            var interval = document.getElementById('intervalSelect').value;
+            window.location.href = '/?interval=' + interval;
+        }
+    </script>
+</body>
+</html>
